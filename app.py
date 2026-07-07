@@ -8,6 +8,8 @@ python -m streamlit run app.py
 st.set_page_config(
     page_title="Startup Investments Dashboard",
     layout="wide"
+
+    
 )
 
 st.title("Startup Investments Dashboard")
