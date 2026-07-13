@@ -21,10 +21,6 @@ STATUS_COLORS = {
     "closed": "#94A3B8",
 }
 
-# category_code is raw Crunchbase data (snake_case) and stays that way in filtering logic —
-# this only controls how it's displayed. Most codes are fine with underscore-to-space plus
-# title case; a few need an explicit override to read naturally ("Games & Video" rather than
-# the literal "Games Video", "E-Commerce" rather than "Ecommerce").
 CATEGORY_LABELS = {
     "games_video": "Games & Video",
     "photo_video": "Photo & Video",
@@ -36,13 +32,6 @@ def category_label(code):
         return code
     return CATEGORY_LABELS.get(code, str(code).replace("_", " ").title())
 
-# country_code is ISO-3 (e.g. "USA") and stays that way in filtering logic and in the
-# choropleth's `locations` (required for the map to place countries correctly) — this only
-# controls display text. pycountry resolves most codes to their official ISO name, but a) a
-# few of those official names are unnecessarily formal for a dashboard ("Korea, Republic of",
-# "Russian Federation") so we override with the common name, and b) a handful of codes in this
-# Crunchbase export are deprecated or non-standard and aren't in pycountry at all — for those,
-# fall back to the raw code rather than guessing.
 COUNTRY_NAMES = {country.alpha_3: country.name for country in pycountry.countries}
 COUNTRY_NAMES.update({
     "BOL": "Bolivia",
@@ -57,8 +46,8 @@ COUNTRY_NAMES.update({
     "VGB": "British Virgin Islands",
     "VIR": "U.S. Virgin Islands",
     "VNM": "Vietnam",
-    "ROM": "Romania",              # deprecated ISO code, not in pycountry
-    "ANT": "Netherlands Antilles", # deprecated ISO code, not in pycountry
+    "ROM": "Romania",
+    "ANT": "Netherlands Antilles",
 })
 
 def country_label(code):
@@ -66,10 +55,6 @@ def country_label(code):
         return code
     return COUNTRY_NAMES.get(code, code)
 
-# Regional bucket for "zoom the map to this country" — Plotly's geo `scope` only supports
-# continent-level regions (no true single-country zoom without a separate lat/lon centroid
-# table), so clicking a country zooms to its region rather than a tight box around just it.
-# Not exhaustive — codes missing here just leave the map at the world view.
 COUNTRY_SCOPES = {
     **{c: "north america" for c in [
         "USA", "CAN", "MEX", "ATG", "BHS", "BLZ", "BMU", "BRB", "CRI", "CUB", "CYM", "DMA",
@@ -102,9 +87,6 @@ COUNTRY_SCOPES = {
 }
 
 def polish(fig):
-    # Plotly's default hoverlabel alignment ("auto") flips to right-aligned text when the
-    # tooltip renders to the left of the cursor, which breaks the key/value column layout.
-    # Force left alignment so hover text reads consistently regardless of tooltip position.
     fig.update_layout(hoverlabel=dict(align="left"))
     return fig
 
@@ -157,8 +139,6 @@ def build_investor_network(dfs, top_n=40, min_edge_weight=2):
                 pair = tuple(sorted((investors[i], investors[j])))
                 edge_weights[pair] = edge_weights.get(pair, 0) + 1
 
-    # Only keep edges backed by repeated co-investment — a single shared round is common
-    # noise at this scale and is what turns the layout into an unreadable hairball.
     edge_weights = {pair: w for pair, w in edge_weights.items() if w >= min_edge_weight}
 
     names = dfs["objects"].set_index("id")["name"]
@@ -173,7 +153,6 @@ def build_investor_network(dfs, top_n=40, min_edge_weight=2):
     for (a, b), weight in edge_weights.items():
         graph.add_edge(a, b, weight=weight)
 
-    # Wider spacing than the default (roughly 1/sqrt(n)) so labels and nodes don't overlap.
     k = 4 / (len(graph) ** 0.5)
     pos = nx.spring_layout(graph, seed=42, k=k, iterations=150)
     return graph, pos
@@ -196,23 +175,17 @@ def reset_filters():
     max_year = int(companies["founded_year"].max(skipna=True))
     st.session_state["year_range"] = (min_year, max_year)
 
-# --- defaults, only set once ---
 if "selected_categories" not in st.session_state:
     st.session_state["selected_categories"] = []
 if "selected_countries" not in st.session_state:
     st.session_state["selected_countries"] = []
 if "selected_statuses" not in st.session_state:
-    # Empty means "no filter" (same convention as category/country below), not "show nothing" —
-    # keeps the sidebar clean by default while every chart still includes all statuses.
     st.session_state["selected_statuses"] = []
 if "year_range" not in st.session_state:
     min_year = int(companies["founded_year"].min(skipna=True))
     max_year = int(companies["founded_year"].max(skipna=True))
     st.session_state["year_range"] = (min_year, max_year)
 
-# Resolve any pending click-to-filter request (e.g. from the outcome-by-category chart)
-# BEFORE the sidebar widgets are instantiated below, since Streamlit disallows writing to a
-# widget's session_state key after that widget has already been instantiated in the same run.
 if st.session_state.get("pending_category_click"):
     st.session_state["selected_categories"] = [st.session_state.pop("pending_category_click")]
 
@@ -270,7 +243,7 @@ with st.sidebar.container(border=True):
         submitted = st.form_submit_button("Apply Filters")
 
     st.button("Reset Filters", on_click=reset_filters)
-# --- Apply filters (always reads current session_state, no separate "submitted" branching needed) ---
+
 filtered = companies.copy()
 
 if st.session_state["selected_categories"]:
@@ -306,10 +279,7 @@ display_df = filtered[display_cols].rename(columns=column_labels)
 display_df["Category"] = display_df["Category"].map(category_label)
 display_df["Country"] = display_df["Country"].map(country_label)
 
-# --- KPI summary cards (driven by `filtered`, so they respond to the sidebar filters) ---
 total_funding = filtered["funding_total_usd"].sum(skipna=True)
-# Most companies in this dataset never raised recorded funding, so a median across ALL
-# companies is trivially $0 — median over funded companies only is the informative number.
 median_funding = filtered.loc[filtered["funding_total_usd"] > 0, "funding_total_usd"].median()
 exit_rate = filtered["status"].isin(["acquired", "ipo"]).mean() * 100 if len(filtered) else 0
 
@@ -323,7 +293,6 @@ tab_overview, tab_trends, tab_categories, tab_geo, tab_network, tab_explorer = s
     ["Overview", "Funding Trends", "Categories & Outcomes", "Geography", "Investor Network", "Company Explorer"]
 )
 
-# ============================== Overview tab ==============================
 with tab_overview:
     col1, col2 = st.columns(2)
 
@@ -351,10 +320,6 @@ with tab_overview:
 
     with col3:
         funded = filtered[(filtered["funding_total_usd"] > 0) & np.isfinite(filtered["funding_total_usd"])].copy()
-        # Plotly Express's histogram `log_x=True` bins on the linear scale then only
-        # relabels the axis, which truncates the visible range on data this skewed.
-        # Binning the log10-transformed values directly avoids that and is the
-        # statistically correct way to build a log-scale histogram.
         funded["log_funding"] = np.log10(funded["funding_total_usd"])
         fig_dist = px.histogram(
             funded, x="log_funding", nbins=50,
@@ -388,7 +353,6 @@ with tab_overview:
     with st.expander("View filtered company data"):
         st.dataframe(display_df.head(20))
 
-# ============================== Funding Trends tab ==============================
 with tab_trends:
     funding_rounds_filtered = funding_rounds[funding_rounds["object_id"].isin(filtered["id"])]
 
@@ -463,7 +427,6 @@ with tab_trends:
         )
         st.plotly_chart(polish(fig_avg_type), use_container_width=True)
 
-# ============================== Categories & Outcomes tab ==============================
 with tab_categories:
     top10_cats = filtered["category_code"].value_counts().head(10).index
     cat_subset = filtered[filtered["category_code"].isin(top10_cats)]
@@ -483,8 +446,6 @@ with tab_categories:
         title="Outcome Rate by Category (% of Companies, Top 10 Categories) — click a bar to filter",
     )
     fig_outcome.update_layout(barmode="stack")
-    # Keep the plotted x values as raw category_code (so click-to-filter below still matches
-    # the sidebar's session_state values) and only relabel the tick text shown to the user.
     fig_outcome.update_xaxes(
         tickvals=list(top10_cats), ticktext=[category_label(c) for c in top10_cats]
     )
@@ -532,7 +493,6 @@ with tab_categories:
         "count are not always the ones that raise the most money per company."
     )
 
-# ============================== Geography tab ==============================
 with tab_geo:
     metric_col, reset_col = st.columns([5, 1])
     with metric_col:
@@ -555,13 +515,7 @@ with tab_geo:
 
     country_df = country_series.reset_index()
     country_df.columns = ["country_code", "value"]
-    # USA outweighs the next-biggest country (UK) by ~7x, so a linear color scale makes
-    # every other country read as nearly-blank white next to it. Color by log10(value) —
-    # same fix as the funding histogram — so mid-tier countries stay visually distinguishable,
-    # then relabel the colorbar with real values instead of raw log numbers.
     country_df["log_value"] = np.log10(country_df["value"])
-    # `locations` must stay ISO-3 codes (that's what locationmode="ISO-3" matches against) —
-    # only the hover label shows the full country name.
     country_df["country_name"] = country_df["country_code"].map(country_label)
 
     fig_map = px.choropleth(
@@ -593,9 +547,6 @@ with tab_geo:
     st.plotly_chart(polish(fig_map), use_container_width=True)
 
     top15_countries = country_series.head(15).sort_values()
-    # Keep the plotted y values as raw country_code (so a click below reports a code we can
-    # look up in COUNTRY_SCOPES) and only relabel the tick text shown to the user — same
-    # approach used for the category outcome chart's click-to-filter.
     fig_country_bar = px.bar(
         x=top15_countries.values, y=top15_countries.index, orientation="h",
         labels={"x": geo_metric, "y": "Country"},
@@ -615,7 +566,6 @@ with tab_geo:
             st.session_state["map_focus_country"] = clicked_country
             st.rerun()
 
-# ============================== Investor Network tab ==============================
 with tab_network:
     st.caption(
         "Nodes are the top 40 investors by number of investments; an edge connects two "
@@ -629,10 +579,6 @@ with tab_network:
 
     graph, pos = build_investor_network(dfs, top_n=40, min_edge_weight=2)
 
-    # Split edges into weight tiers so co-investment strength reads visually — a single line
-    # trace can't vary width per-segment, so each tier is its own trace, faintest first so
-    # the strongest ties draw on top and stand out. Dimmer overall than a first pass so the
-    # nodes/labels read clearly against the dense core.
     edge_tiers = [
         ("weak", lambda w: w < 4, "rgba(148, 163, 184, 0.12)", 1),
         ("medium", lambda w: 4 <= w < 8, "rgba(100, 116, 139, 0.25)", 1.5),
@@ -654,9 +600,6 @@ with tab_network:
             hoverinfo="none", showlegend=False,
         ))
 
-    # Label only the most active investors — labeling all nodes at this density just
-    # recreates the clutter problem, so the label itself acts as a "top investor" cue.
-    # Fewer than before (10, not 15) since the dense core left little room to read them.
     label_rank = sorted(graph.nodes(data=True), key=lambda n: -n[1]["investments"])
     labeled_ids = {node_id for node_id, _ in label_rank[:10]}
 
@@ -670,8 +613,6 @@ with tab_network:
         node_hover.append(f"{data['name']} ({data['investments']} investments)")
         node_ids.append(node_id)
         if node_id in labeled_ids:
-            # Plain text labels got lost in the dense core, so labels are a background
-            # "chip" instead — stays legible no matter how many edges cross behind it.
             label_annotations.append(dict(
                 x=x, y=y, text=data["name"], showarrow=False, yshift=16,
                 font=dict(size=10, color="#1E293B"),
@@ -699,9 +640,6 @@ with tab_network:
     )
 
     selected_points = (network_selection or {}).get("selection", {}).get("points", [])
-    # Node-trace points carry customdata (the investor id); edge-trace points never do —
-    # checking for that is more robust than a hardcoded curve index now that edges are
-    # split across multiple weight-tier traces.
     investor_points = [p for p in selected_points if p.get("customdata") is not None]
     if investor_points:
         selected_investor_id = investor_points[0].get("customdata")
@@ -716,7 +654,6 @@ with tab_network:
         portfolio["Country"] = portfolio["Country"].map(country_label)
         st.dataframe(portfolio.head(50))
 
-# ============================== Company Explorer tab ==============================
 with tab_explorer:
     company_query = st.text_input("Search for a company by name", placeholder="e.g. Facebook")
 
