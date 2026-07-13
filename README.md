@@ -36,7 +36,7 @@ The CSVs (~200MB total) are **not** committed to this repo — GitHub's file
 limit is 100MB. Download the zip from the shared link below and unzip it so
 the folder ends up at `./data/` inside the repo root:
 
-> **Data zip:** _<paste your Dropbox / Drive share link here>_
+> **Data zip:** https://github.com/user-attachments/files/29975345/data.zip
 
 After unzipping you should have:
 
